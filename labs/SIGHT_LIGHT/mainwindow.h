@@ -5,8 +5,8 @@
 #include <QComboBox>
 #include <QGraphicsScene>
 #include <QGraphicsView>
-
-// Вместо forward declaration используем полное включение
+#include <QGraphicsPolygonItem>
+#include <QGraphicsEllipseItem>
 #include "controller.h"
 
 class MainWindow : public QMainWindow
@@ -19,45 +19,42 @@ public:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event);
 
 private slots:
     void onModeChanged(int index);
-    void onMousePressed(QPointF pos, Qt::MouseButton button);
-    void onMouseMoved(QPointF pos);
+    void handleViewportMousePress(QMouseEvent* event);
+    void handleViewportMouseMove(QMouseEvent* event);
 
 private:
-    void setupUI();
-    void updateScene();
-    void drawLightArea(const QPointF& source);
-    void drawPolygons();
-    void drawLightSource(const QPointF& light);
+    void setupUserInterface();
+    void redrawSceneContent();
+    void drawLightAreaVisuals();
+    void drawObstaclePolygons();
+    void drawLightSourceMarkers();
+    void updateControllerLightSourcePositions(const QPointF& main_cursor_pos);
+    void drawSceneAABB();
 
-    void drawLightAreas();
-    void updateLightSources(const QPointF& mainPos);
-    void drawLightSources();
+    QGraphicsScene* m_mainGraphicsScene;
+    QGraphicsView* m_mainGraphicsView;
+    QComboBox* m_applicationModeComboBox;
+    Controller* m_logicController;
 
-    void drawBoundingBox();
+    std::vector<QGraphicsPolygonItem*> m_renderedLightAreaItems;
+    std::vector<QGraphicsEllipseItem*> m_renderedLightSourceMarkerItems;
 
-    std::vector<QGraphicsPolygonItem*> m_lightAreaItems;
-    std::vector<QGraphicsEllipseItem*> m_lightSourceItems;
-    std::vector<QGraphicsEllipseItem*> m_vertexItems;
+    struct VisualStyleSettings {
+        qreal lightMarkerRadius = 3.5;
+        qreal secondaryLightSpreadRadius = 15.0;
+        int numberOfSecondaryLights = 4;
+        QColor lightPolygonFillColor = QColor(255, 255, 150, 80);
+    } m_visualStyle;
 
-    struct {
-        qreal lightSourceRadius = 3.5;
-        qreal lightSpreadRadius = 18.0;
-        int lightSourceCount = 9;
-        QColor lightAreaColor = QColor(255, 240, 150, 40);
-    } m_visualSettings;
+    bool m_isCurrentlyDrawingPolygon;
+    int m_currentApplicationMode;
 
-    QGraphicsScene* m_scene;
-    QGraphicsView* m_view;
-    QComboBox* m_modeComboBox;
-    Controller* m_controller;
-    bool m_drawingPolygon = false;
-    int m_currentMode = 0;
-    int m_sceneWidth = 800;
-    int m_sceneHeight = 600;
+    const int m_sceneWidthValue = 800;
+    const int m_sceneHeightValue = 600;
 };
 
 #endif // MAINWINDOW_H
+

@@ -1,312 +1,221 @@
 #include "mainwindow.h"
 #include <QVBoxLayout>
-#include <QGraphicsEllipseItem>
-#include <QGraphicsPolygonItem>
 #include <QMouseEvent>
-
 #include <QPalette>
 #include <QDebug>
+#include <cmath>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
-    m_scene(new QGraphicsScene(this)),
-    m_view(new QGraphicsView(m_scene, this)),
-    m_modeComboBox(new QComboBox(this)),
-    m_controller(new Controller()),
-    m_drawingPolygon(false),
-    m_currentMode(0)
+    m_mainGraphicsScene(new QGraphicsScene(this)),
+    m_mainGraphicsView(new QGraphicsView(m_mainGraphicsScene, this)),
+    m_applicationModeComboBox(new QComboBox(this)),
+    m_logicController(new Controller(m_sceneWidthValue, m_sceneHeightValue)),
+    m_isCurrentlyDrawingPolygon(false),
+    m_currentApplicationMode(0)
 {
-    setupUI();
-    setFixedSize(800, 600);
+    setupUserInterface();
+    int top_ui_elements_height = m_applicationModeComboBox->sizeHint().height() +
+                                 (layout() ? layout()->contentsMargins().top() + layout()->contentsMargins().bottom() : 0) + 20;
+    setFixedSize(m_sceneWidthValue + 20, m_sceneHeightValue + top_ui_elements_height);
     setWindowFlag(Qt::WindowMaximizeButtonHint, false);
+    updateControllerLightSourcePositions(QPointF(m_sceneWidthValue / 2.0, m_sceneHeightValue / 2.0));
 }
 
 MainWindow::~MainWindow()
 {
-    delete m_controller;
+    delete m_logicController;
 }
 
-void MainWindow::setupUI()
+void MainWindow::setupUserInterface()
 {
-    QWidget* centralWidget = new QWidget(this);
-    QVBoxLayout* layout = new QVBoxLayout(centralWidget);
+    QWidget* central_widget = new QWidget(this);
+    QVBoxLayout* root_layout = new QVBoxLayout(central_widget);
 
-    m_modeComboBox = new QComboBox(this);
-    m_modeComboBox->addItem("Light Mode");
-    m_modeComboBox->addItem("Polygons Mode");
-    connect(m_modeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+    m_applicationModeComboBox->addItem("Режим: Свет");
+    m_applicationModeComboBox->addItem("Режим: Полигоны");
+    connect(m_applicationModeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onModeChanged);
 
-   // m_view = new QGraphicsView(m_scene, this);
-    m_view->setRenderHint(QPainter::Antialiasing);
-    m_view->setSceneRect(0, 0, 800, 600);
-    m_view->setBackgroundBrush(QPalette().base());
-    // m_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    // m_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_mainGraphicsView->setRenderHint(QPainter::Antialiasing);
+    m_mainGraphicsView->setSceneRect(0, 0, m_sceneWidthValue, m_sceneHeightValue);
+    m_mainGraphicsView->setBackgroundBrush(QPalette().color(QPalette::Base));
+    m_mainGraphicsView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_mainGraphicsView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    if (m_mainGraphicsView->viewport()) {
+        m_mainGraphicsView->viewport()->installEventFilter(this);
+    }
 
-    m_view->viewport()->installEventFilter(this);
+    root_layout->addWidget(m_applicationModeComboBox);
+    root_layout->addWidget(m_mainGraphicsView);
+    setCentralWidget(central_widget);
 
-    layout->addWidget(m_modeComboBox);
-    layout->addWidget(m_view);
-
-    QPoint startPos(300, 300);
-
-    QCursor::setPos(startPos);
-
-    setCentralWidget(centralWidget);
-
-    updateScene();
+    if (m_mainGraphicsView->viewport()) {
+        QCursor::setPos(m_mainGraphicsView->mapToGlobal(QPoint(m_sceneWidthValue / 2, m_sceneHeightValue / 2)));
+    }
+    redrawSceneContent();
 }
 
 void MainWindow::onModeChanged(int index)
 {
-    m_currentMode = index;
-    updateScene();
+    m_currentApplicationMode = index;
+    m_isCurrentlyDrawingPolygon = false;
+    redrawSceneContent();
 }
 
-bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+bool MainWindow::eventFilter(QObject* watched_object, QEvent* event_obj)
 {
-    if (watched == m_view->viewport()) {
-        if (event->type() == QEvent::MouseButtonPress) {
-            auto mouseEvent = static_cast<QMouseEvent*>(event);
-            QPointF scenePos = m_view->mapToScene(mouseEvent->pos());
-            onMousePressed(scenePos, mouseEvent->button());
+    if (watched_object == m_mainGraphicsView->viewport()) {
+        if (event_obj->type() == QEvent::MouseButtonPress) {
+            handleViewportMousePress(static_cast<QMouseEvent*>(event_obj));
             return true;
-        }
-        else if (event->type() == QEvent::MouseMove) {
-            auto mouseEvent = static_cast<QMouseEvent*>(event);
-            QPointF scenePos = m_view->mapToScene(mouseEvent->pos());
-            onMouseMoved(scenePos);
+        } else if (event_obj->type() == QEvent::MouseMove) {
+            handleViewportMouseMove(static_cast<QMouseEvent*>(event_obj));
             return true;
         }
     }
-    return QMainWindow::eventFilter(watched, event);
+    return QMainWindow::eventFilter(watched_object, event_obj);
 }
 
-void MainWindow::onMousePressed(QPointF pos, Qt::MouseButton button)
+void MainWindow::handleViewportMousePress(QMouseEvent* mouse_event)
 {
-    if (m_currentMode == 1) { // Polygons mode
-        QPointF point(pos.x(), pos.y());
-
-        if (button == Qt::LeftButton) {
-            if (!m_drawingPolygon) {
-                // Start new polygon
-                m_controller->addPolygon(Polygon());
-                m_controller->addVertexToLastPolygon(point);
-                m_drawingPolygon = true;
+    QPointF scene_click_pos = m_mainGraphicsView->mapToScene(mouse_event->pos());
+    if (m_currentApplicationMode == 1) {
+        if (mouse_event->button() == Qt::LeftButton) {
+            if (!m_isCurrentlyDrawingPolygon) {
+                m_logicController->addPolygon(Polygon());
+                m_logicController->addVertexToLastPolygon(scene_click_pos);
+                m_logicController->addVertexToLastPolygon(scene_click_pos);
+                m_isCurrentlyDrawingPolygon = true;
             } else {
-                // Add vertex to current polygon
-                m_controller->addVertexToLastPolygon(point);
+                m_logicController->updateLastPolygon(scene_click_pos);
+                m_logicController->addVertexToLastPolygon(scene_click_pos);
             }
-        } else if (button == Qt::RightButton && m_drawingPolygon) {
-            // Finish current polygon
-            m_drawingPolygon = false;
+        } else if (mouse_event->button() == Qt::RightButton && m_isCurrentlyDrawingPolygon) {
+            m_isCurrentlyDrawingPolygon = false;
         }
     }
-
-    updateScene();
+    redrawSceneContent();
 }
 
-void MainWindow::onMouseMoved(QPointF pos)
+void MainWindow::handleViewportMouseMove(QMouseEvent* mouse_event)
 {
-    if (m_currentMode == 0) { // Light mode
-        m_controller->setLightSource(QPointF(pos.x(), pos.y()));
-        updateScene();
-    } else if (m_currentMode == 1 && m_drawingPolygon) { // Polygons mode and drawing
-        QPoint point(pos.x(), pos.y());
-        m_controller->updateLastPolygon(point);
-        updateScene();
+    QPointF scene_cursor_pos = m_mainGraphicsView->mapToScene(mouse_event->pos());
+    if (m_currentApplicationMode == 0) {
+        updateControllerLightSourcePositions(scene_cursor_pos);
+        redrawSceneContent();
+    } else if (m_currentApplicationMode == 1 && m_isCurrentlyDrawingPolygon) {
+        m_logicController->updateLastPolygon(scene_cursor_pos);
+        redrawSceneContent();
     }
 }
 
-void MainWindow::updateScene()
+void MainWindow::redrawSceneContent()
 {
-    m_scene->clear();
-    drawPolygons();
+    m_renderedLightAreaItems.clear();
+    m_renderedLightSourceMarkerItems.clear();
+    m_mainGraphicsScene->clear();
 
-    //drawLightSources();
-    QVector<QPointF> vertices = {
-        QPointF(1, 1),
-        QPointF(799, 1),
-        QPointF(799, 599),
-        QPointF(1, 599)
-    };
-    QGraphicsPolygonItem* item = m_scene->addPolygon(
-        QPolygonF(vertices),
-        QPen(Qt::black),
-        QBrush(Qt::NoBrush)
-        );
-        item->setZValue(1);
-    if (m_currentMode == 0) {
+    drawSceneAABB();
+    drawObstaclePolygons();
 
+    if (m_currentApplicationMode == 0) {
+        drawLightSourceMarkers();
+        drawLightAreaVisuals();
+    }
+}
 
-        auto vertices = m_controller->getLightSources();
-        for(const auto& point : vertices) {
-            drawLightSource(point);
-            drawLightArea(point);
+void MainWindow::drawLightAreaVisuals() {
+    std::vector<Polygon> light_polys = m_logicController->calculateAllLightAreasForMultipleSources();
+    for (const auto& area_poly_data : light_polys) {
+        const auto& verts = area_poly_data.getVertices();
+        if (verts.size() < 3) continue;
+        QPolygonF q_poly;
+        for (const auto& v_pt : verts) q_poly << v_pt;
+        QGraphicsPolygonItem* g_item = m_mainGraphicsScene->addPolygon(q_poly, QPen(Qt::NoPen), QBrush(m_visualStyle.lightPolygonFillColor));
+        if (g_item) {
+            g_item->setZValue(1);
+            m_renderedLightAreaItems.push_back(g_item);
         }
     }
 }
 
-void MainWindow::drawLightArea(const QPointF& source)
-{
-    auto lightPoints = m_controller->calculateLightAreaForSource(source);
-     const auto& vertices = lightPoints.getVertices();
+void MainWindow::updateControllerLightSourcePositions(const QPointF& main_cursor_pos) {
+    std::vector<QPointF> new_sources;
+    new_sources.push_back(main_cursor_pos);
 
-    if (lightPoints.vertexCount() < 3) return;
-
-    // Создаем QPolygonF вручную из точек
-    QVector<QPointF> polygonPoints;
-    polygonPoints.reserve(vertices.size());
-
-    for (const auto& point : vertices) {
-        polygonPoints.append(QPointF(point));
+    for (int i = 0; i < m_visualStyle.numberOfSecondaryLights; ++i) {
+        double angle_rad = 2 * M_PI * i / m_visualStyle.numberOfSecondaryLights;
+        QPointF offset_vec(m_visualStyle.secondaryLightSpreadRadius * std::cos(angle_rad),
+                           m_visualStyle.secondaryLightSpreadRadius * std::sin(angle_rad));
+        new_sources.push_back(main_cursor_pos + offset_vec);
     }
-
-    QGraphicsPolygonItem* item = m_scene->addPolygon(
-        QPolygonF(polygonPoints),
-        QPen(Qt::NoPen),
-        QBrush(QColor(255, 150, 150, 50))
-        );
-    item->setZValue(1);
-
-    // const int vertexRadius = 5;
-    // for (const auto& vertex : vertices) {
-    //     QGraphicsEllipseItem* vertexItem = m_scene->addEllipse(
-    //         vertex.x() - vertexRadius,
-    //         vertex.y() - vertexRadius,
-    //         vertexRadius * 2,
-    //         vertexRadius * 2,
-    //         QPen(Qt::NoPen),     // Без контура
-    //         QBrush(Qt::red)      // Красная заливка
-    //         );
-    //     vertexItem->setZValue(2); // Вершины поверх многоугольника
-
-    // }
+    m_logicController->setLightSources(new_sources);
+    m_logicController->setLightSource(main_cursor_pos);
 }
 
-
-
-// void MainWindow::drawLightArea()
-// {
-//     auto lightAreas = m_controller->createLightAreas();
-
-//     for (size_t i = 0; i < lightAreas.size(); i++) {
-//         std::vector<QPointF> vertices = lightAreas[i].getVertices();
-//         QVector<QPointF> polygonPoints = {};
-//         polygonPoints.reserve(vertices.size());
-
-//         for (const auto& point : vertices) {
-//             polygonPoints.append(QPointF(point));
-//         }
-//         if (vertices.size() >= 3) {
-//             QGraphicsPolygonItem* item = m_scene->addPolygon(
-//                 QPolygonF(polygonPoints),
-//                 QPen(Qt::NoPen),
-//                 QBrush(QColor(QColor(171, 36, 36, 100)))
-//                 );
-
-//         }
-//     }
-// }
-
-void MainWindow::drawLightAreas() {
-    // Очистка предыдущих элементов
-
-
-    // Получаем все световые области
-    auto lightAreas = m_controller->calculateAllLightAreas();
-
-    // Настройки визуализации
-    const QColor lightColor(255, 255, 0, 50); // Полупрозрачный желтый
-    const QPen outlinePen(Qt::NoPen); // Без контура
-
-    // Рисуем каждую область
-    for (const auto& area : lightAreas) {
-        QVector<QPointF> points;
-        for (const auto& p : area.getVertices()) {
-            points << QPointF(p);
+void MainWindow::drawLightSourceMarkers() {
+    const auto& current_sources = m_logicController->getLightSources();
+    for (const auto& src_pos : current_sources) {
+        QGraphicsEllipseItem* marker_item = m_mainGraphicsScene->addEllipse(
+            src_pos.x() - m_visualStyle.lightMarkerRadius, src_pos.y() - m_visualStyle.lightMarkerRadius,
+            m_visualStyle.lightMarkerRadius * 2, m_visualStyle.lightMarkerRadius * 2,
+            QPen(Qt::black), QBrush(Qt::yellow));
+        if (marker_item) {
+            marker_item->setZValue(2);
+            m_renderedLightSourceMarkerItems.push_back(marker_item);
         }
+    }
+}
 
-        auto* areaItem = m_scene->addPolygon(
-            QPolygonF(points),
-            outlinePen,
-            QBrush(lightColor)
+void MainWindow::drawObstaclePolygons() {
+    for (const auto& poly_data : m_logicController->getPolygons()) {
+        const auto& verts = poly_data.getVertices();
+        if (verts.empty()) continue;
+        QPolygonF q_poly;
+        for (const auto& v_pt : verts) q_poly << v_pt;
+
+        if (m_isCurrentlyDrawingPolygon && !m_logicController->getPolygons().empty() && &poly_data == &m_logicController->getPolygons().back()) {
+            if (verts.size() >= 1) {
+                m_mainGraphicsScene->addPolygon(q_poly, QPen(Qt::blue, 1.5), QBrush(Qt::NoBrush))->setZValue(0);
+            }
+            for(const auto& v_pt : verts) {
+                m_mainGraphicsScene->addEllipse(v_pt.x()-2.5, v_pt.y()-2.5, 5, 5, QPen(Qt::black), QBrush(Qt::blue))->setZValue(3);
+            }
+        } else if (verts.size() >= 3) {
+            m_mainGraphicsScene->addPolygon(q_poly, QPen(Qt::black), QBrush(Qt::gray))->setZValue(0);
+        } else if (verts.size() == 2) {
+            m_mainGraphicsScene->addLine(QLineF(verts[0], verts[1]), QPen(Qt::black, 2))->setZValue(0);
+        }
+    }
+}
+
+void MainWindow::drawSceneAABB() {
+    QPolygonF box_poly_qf;
+    const auto& bbox_vertices_std_vec = m_logicController->getBoundingBoxVertices();
+    if (bbox_vertices_std_vec.size() < 3) return;
+    for(const QPointF& v_qpointf : bbox_vertices_std_vec) {
+        box_poly_qf << v_qpointf;
+    }
+
+    QGraphicsPolygonItem* box_item = m_mainGraphicsScene->addPolygon(
+        box_poly_qf, QPen(Qt::DashLine), QBrush(Qt::NoBrush) );
+    if(box_item) box_item->setZValue(-1);
+    qreal vertex_marker_radius = 2.5;
+    QColor vertex_marker_color = Qt::red;
+    QPen vertex_marker_pen(Qt::black, 0.5);
+    QBrush vertex_marker_brush(vertex_marker_color);
+
+    for(const QPointF& vertex_qpointf : bbox_vertices_std_vec) {
+        QGraphicsEllipseItem* vertex_marker_item = m_mainGraphicsScene->addEllipse(
+            vertex_qpointf.x() - vertex_marker_radius,
+            vertex_qpointf.y() - vertex_marker_radius,
+            vertex_marker_radius * 2,
+            vertex_marker_radius * 2,
+            vertex_marker_pen,
+            vertex_marker_brush
             );
-        areaItem->setZValue(1);
-        m_lightAreaItems.push_back(areaItem);
+        if(vertex_marker_item) vertex_marker_item->setZValue(5);
     }
 }
 
-
-
-void MainWindow::updateLightSources(const QPointF& mainPos) {
-    std::vector<QPointF> sources;
-    const int radius = 10; // Радиус рассеивания
-    const int count = 5;   // Количество источников
-
-    for (int i = 0; i < count; ++i) {
-        double angle = 2 * M_PI * i / count;
-        QPoint offset(radius * cos(angle), radius * sin(angle));
-        sources.push_back(mainPos + offset);
-    }
-
-    m_controller->setLightSources(sources);
-    drawLightAreas();
-}
-
-void MainWindow::drawLightSources() {
-    // Очистка старых источников
-    for (auto* item : m_lightSourceItems) {
-        m_scene->removeItem(item);
-        delete item;
-    }
-    m_lightSourceItems.clear();
-
-    // Рисование новых
-    const int radius = 30;
-    for (const auto& source : m_controller->getLightSources()) {
-        auto* item = m_scene->addEllipse(
-            source.x() - radius,
-            source.y() - radius,
-            radius * 2,
-            radius * 2,
-            QPen(Qt::black),
-            QBrush(Qt::yellow)
-            );
-        item->setZValue(3);
-        m_lightSourceItems.push_back(item);
-    }
-}
-
-
-void MainWindow::drawPolygons()
-{
-    for (const auto& polygon : m_controller->getPolygons()) {
-        auto vertices = polygon.getVertices();
-
-        if (vertices.size() < 2) continue;
-
-        QPolygonF qpolygon;
-        for (const auto& vertex : vertices) {
-            qpolygon << QPointF(vertex);
-        }
-
-        QGraphicsPolygonItem* item = m_scene->addPolygon(qpolygon, QPen(Qt::black), QBrush(Qt::gray));
-        item->setZValue(0);
-    }
-}
-
-// В MainWindow
-void MainWindow::mouseMoveEvent(QMouseEvent* event) {
-    updateLightSources(event->pos());
-    drawLightSources(); // Обновляем позиции источников
-    QMainWindow::mouseMoveEvent(event);
-}
-
-void MainWindow::drawLightSource(const QPointF& light)
-{
-    QGraphicsEllipseItem* item = m_scene->addEllipse(light.x() - 3, light.y() - 3, 6, 6,
-                                                     QPen(Qt::black), QBrush(Qt::yellow));
-    item->setZValue(2);
-}

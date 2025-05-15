@@ -5,6 +5,7 @@
 #include <QPointF>
 #include "polygon.h"
 #include "ray.h"
+#include <optional>
 
 class Controller
 {
@@ -17,43 +18,37 @@ public:
     void updateLastPolygon(const QPointF& new_vertex);
 
     QPointF getLightSource() const;
-    std::vector<QPointF> getLightSources();
     void setLightSource(const QPointF& light_source);
 
-    Polygon calculateLightArea() const;
-    Polygon calculateLightAreaForSource(const QPointF& source) const;
-
-    Polygon createLightArea() const;
-    std::vector<Polygon> createLightAreas();
-    void GenerateShades();
-
+    std::vector<QPointF> getLightSources() const;
     void setLightSources(const std::vector<QPointF>& sources);
 
-    std::vector<Polygon> calculateAllLightAreas();
-
-private:
-    std::vector<Polygon> m_polygons;
-    QPointF m_light_source ;
-    Polygon m_bounding_polygon;
-    int m_width;
-    int m_height;
-
-   std::optional<QPointF> lineIntersection(const QPointF& p1, const QPointF& p2,
-                                          const QPointF& p3, const QPointF& p4) const;
-    bool pointOnSegment(const QPointF& p, const QPointF& a, const QPointF& b) const;
-    void initializeBoundingPolygon();
     std::vector<Ray> castRays() const;
-
-    std::vector<Ray> castRaysSources(const QPointF& source) const;
     void intersectRays(std::vector<Ray>* rays) const;
     void removeAdjacentRays(std::vector<Ray>* rays) const;
+    Polygon createLightArea() const;
+
+    Polygon calculateLightAreaForSource(const QPointF& source) const;
+    std::vector<Polygon> calculateAllLightAreasForMultipleSources();
+
+     const std::vector<QPointF>& getBoundingBoxVertices() const;
+
+
+private:
+    std::vector<Polygon> m_scene_polygons;
+    Polygon m_bounding_box_polygon;
+    int m_scene_width;
+    int m_scene_height;
+
+    QPointF m_single_light_source_pos;
+    std::vector<QPointF> m_multiple_light_sources_pos;
+
+    void initializeBoundingBox(int width, int height);
+    std::vector<Ray> castRaysFromSource(const QPointF& source_pos) const;
+
     static bool compareRaysByAngle(const Ray& a, const Ray& b);
-    bool pointOnRay(const QPointF& p, const QPointF& ray_begin, const QPointF& ray_end) const;
-
-    std::vector<QPointF> m_light_sources;
-     std::vector<QPointF> light_sources_shades;
-
-
+    static double pointDistanceSquared(const QPointF& p1, const QPointF& p2);
 };
 
 #endif // CONTROLLER_H
+
