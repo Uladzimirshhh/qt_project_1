@@ -7,45 +7,37 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), boardSize(6), current
 void MainWindow::initUI() {
     mainLayout = new QVBoxLayout(this);
     setLayout(mainLayout);
-
- //   bool ok;
     boardSize = QInputDialog::getInt(this, "Выбор размера доски", "Введите размер доски (минимум 4):", 6, 4, 20);
     if (boardSize <= 3) {
         QMessageBox::warning(this, "Ошибка", "Размер доски должен быть не менее 4.");
         return;
     }
-
-    // Создать доску
     board = std::vector<std::vector<int>>(boardSize, std::vector<int>(boardSize, 0));
     buttons.resize(boardSize * boardSize);
-
     boardLayout = new QGridLayout();
-    mainLayout->addLayout(boardLayout);
-
+    boardLayout->setSpacing(0);
+    boardLayout->setContentsMargins(0, 0, 0, 0);
     for (int row = 0; row < boardSize; ++row) {
         for (int col = 0; col < boardSize; ++col) {
             QPushButton *button = new QPushButton(this);
-            button->setFixedSize(50, 50);
-            button->setStyleSheet("background-color: white;");
+            button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            button->setText("");
             connect(button, &QPushButton::clicked, [this, row, col]() { onButtonClicked(row, col); });
             boardLayout->addWidget(button, row, col);
             buttons[row * boardSize + col] = button;
         }
     }
-
     infoLayout = new QHBoxLayout();
     mainLayout->addLayout(infoLayout);
-
     playerLabel = new QLabel("Ход игрока 1", this);
     infoLayout->addWidget(playerLabel);
-
     resetButton = new QPushButton("Новая игра", this);
     connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetGame);
     infoLayout->addWidget(resetButton);
-
+    mainLayout->addLayout(boardLayout);
     updateBoard();
     setWindowTitle("4 в ряд");
-    resize(400, 400);
+    resize(600, 600);
 }
 
 void MainWindow::updateBoard() {
@@ -55,18 +47,18 @@ void MainWindow::updateBoard() {
             QPushButton *button = buttons[index];
 
             switch (board[row][col]) {
-                case 0:
-                    button->setText("");
-                    button->setStyleSheet("background-color: white; color: black;");
-                    break;
-                case 1:
-                    button->setText("X");
-                    button->setStyleSheet("background-color: red; color: white;");
-                    break;
-                case 2:
-                    button->setText("O");
-                    button->setStyleSheet("background-color: blue; color: white;");
-                    break;
+            case 0:
+                button->setText("");
+                button->setStyleSheet("background-color: white; color: black;");
+                break;
+            case 1:
+                button->setText("X");
+                button->setStyleSheet("background-color: red; color: white;");
+                break;
+            case 2:
+                button->setText("O");
+                button->setStyleSheet("background-color: blue; color: white;");
+                break;
             }
         }
     }
@@ -149,3 +141,4 @@ void MainWindow::resetGame() {
     playerLabel->setText("Ход игрока 1");
     updateBoard();
 }
+
